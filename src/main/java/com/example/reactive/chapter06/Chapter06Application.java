@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.Netty4ClientHttpRequestFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.AsyncResult;
@@ -39,8 +38,10 @@ public class Chapter06Application {
             DeferredResult<String> dr = new DeferredResult<>();
 
             Completion.from(rt.getForEntity(URL1, String.class, "hello" + idx))
-                    .andApply(s -> rt.getForEntity(URL2, String.class, s.getBody()))
-                    .andAccept(s -> dr.setResult(s.getBody()));
+                      .andApply(s -> rt.getForEntity(URL2, String.class, s.getBody()))
+                      .andApply(s -> myService.work(s.getBody()))
+                      .andError(e -> dr.setErrorResult(e.toString()))
+                      .andAccept(s -> dr.setResult(s));
 //            ListenableFuture<ResponseEntity<String>> f1 = rt.getForEntity(URL1, String.class, "hello" + idx);
 //            f1.addCallback(s -> {
 //                ListenableFuture<ResponseEntity<String>> f2 = rt
@@ -63,34 +64,70 @@ public class Chapter06Application {
         }
     }
 
-    public static class Completion{
-        Completion next;
-
-        public Completion() { }
-
-        Consumer<ResponseEntity<String>> con;
-        public Completion(Consumer<ResponseEntity<String>> con) {
+    public static class AcceptCompletion<S, T> extends Completion<S, Void>{
+        Consumer<S> con;
+        public AcceptCompletion(Consumer<S> con) {
             this.con = con;
         }
 
-        Function<ResponseEntity<String>, ListenableFuture<ResponseEntity<String>>> fn;
-        public Completion(Function<ResponseEntity<String>, ListenableFuture<ResponseEntity<String>>> fn) {
+        @Override
+        public void run(S value) {
+            con.accept(value); //작업 처리해 라면서 이전 작업 넘겨줌
+        }
+    }
+
+    public static class ErrorCompletion<T>extends Completion<T, T>{
+        Consumer<Throwable> econ;
+        public ErrorCompletion(Consumer<Throwable> econ) {
+            this.econ = econ;
+        }
+
+        @Override
+        public void run(T value) {
+            if(next != null) next.run(value);
+        }
+
+        @Override
+        public void error(Throwable ex) {
+            econ.accept(ex); //내가 처리할게
+        }
+    }
+
+    public static class ApplyCompletion<S, T> extends Completion<S, T>{
+        Function<S, ListenableFuture<T>> fn;
+        public ApplyCompletion(Function<S, ListenableFuture<T>> fn) {
             this.fn = fn;
         }
 
-        public void andAccept(Consumer<ResponseEntity<String>> con){
-            Completion completion = new Completion(con);
+        @Override
+        public void run(S value) {
+            ListenableFuture<T> lf = fn.apply(value);
+            lf.addCallback(s -> complete(s), ex -> error(ex));
+        }
+    }
+
+    public static class Completion<S, T>{
+        Completion next;
+
+        public void andAccept(Consumer<T> con){
+            Completion<T, Void> completion = new AcceptCompletion<>(con);
             this.next = completion;
         }
 
-        public Completion andApply(Function<ResponseEntity<String>, ListenableFuture<ResponseEntity<String>>> fn){
-            Completion completion = new Completion(fn);
+        public Completion<T,T> andError(Consumer<Throwable> econ){
+            Completion<T,T> completion = new ErrorCompletion<>(econ);
             this.next = completion;
             return completion;
         }
 
-        public static Completion from(ListenableFuture<ResponseEntity<String>> lf) {
-            Completion completion = new Completion();
+        public <V> Completion<T, V> andApply(Function<T, ListenableFuture<V>> fn){
+            Completion<T, V> completion = new ApplyCompletion<>(fn);
+            this.next = completion;
+            return completion;
+        }
+
+        public static <S, T> Completion<S, T> from(ListenableFuture<T> lf) {
+            Completion<S, T> completion = new Completion();
             lf.addCallback(s -> {
                 completion.complete(s);
             }, ex -> {
@@ -99,21 +136,15 @@ public class Chapter06Application {
             return completion;
         }
 
-        private void error(Throwable ex) {
-
+        public void error(Throwable ex) {
+            if(next != null) next.error(ex);
         }
 
-        private void complete(ResponseEntity<String> s) {
+        public void complete(T s) {
             if(next != null) next.run(s);
         }
 
-        private void run(ResponseEntity<String> value) {
-            if(con != null) con.accept(value); //받아서 넘기도
-            else if(fn != null){ //run이면 어떤 작업을 해주어야 함
-                ListenableFuture<ResponseEntity<String>> lf = fn.apply(value);
-                lf.addCallback(s -> complete(s), ex -> error(ex)); //이 비동기 작업에 대해서도 콜백을 해주어야 함
-            }
-        }
+        public void run(S value) { }
     }
 
     @Service
