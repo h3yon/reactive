@@ -33,16 +33,16 @@ public class SchedulerEx {
         // pub
 
 //        //pub과 sub을 이어줌
-        Publisher<Integer> subOnPub = sub -> {
-            ExecutorService es = Executors.newSingleThreadExecutor(new CustomizableThreadFactory(){
-                @Override
-                public String getThreadNamePrefix() { return "subOn-"; }
-            }); //하나의 싱글 스레드
-            es.execute(() -> pub.subscribe(sub));
-        };
+//        Publisher<Integer> subOnPub = sub -> {
+//            ExecutorService es = Executors.newSingleThreadExecutor(new CustomizableThreadFactory(){
+//                @Override
+//                public String getThreadNamePrefix() { return "subOn-"; }
+//            }); //하나의 싱글 스레드
+//            es.execute(() -> pub.subscribe(sub));
+//        };
 
         Publisher<Integer> pubOnPub = sub -> {
-            subOnPub.subscribe(new Subscriber<Integer>() {
+            pub.subscribe(new Subscriber<Integer>() {
                 ExecutorService es = Executors.newSingleThreadExecutor(new CustomizableThreadFactory(){
                     @Override
                     public String getThreadNamePrefix() { return "pubOn-"; }
@@ -61,11 +61,13 @@ public class SchedulerEx {
                 @Override
                 public void onError(Throwable t) {
                     es.execute(() -> sub.onError(t));
+                    es.shutdown(); //작업 다 마치면 종료
                 }
 
                 @Override
                 public void onComplete() {
                     es.execute(() -> sub.onComplete());
+                    es.shutdown();
                 }
             });
         };
