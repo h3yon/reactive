@@ -1,6 +1,7 @@
 package com.example.reactive.chapter02;
 
 import java.util.List;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -33,7 +34,31 @@ public class PubSub {
         Publisher<String> mapPub = mapPub(pub, s -> "[" + s * 10 + "]"); //얘도 퍼블리셔
 //        Publisher<Integer> mapPub2 = mapPub(pub, s -> s * -s); // publisher를 하나 더 만들어서 operator할 수 있음
 //        Publisher<Integer> sumPub = sumPub(pub);
-        mapPub.subscribe(logSub());
+        Publisher<StringBuilder> reducePub = reducePub(pub, new StringBuilder(), (a, b) -> a.append(b + ","));
+        reducePub.subscribe(logSub());
+    }
+
+    private static <T, R> Publisher<R> reducePub(Publisher<T> pub, R init, BiFunction<R, T, R> bf) {
+        return new Publisher<R>() {
+            R result = init;
+            @Override
+            public void subscribe(Subscriber<? super R> sub) {
+                pub.subscribe(new DelegateSub<T, R>(sub){
+                    R result = init;
+
+                    @Override
+                    public void onNext(T i) {
+                        result = bf.apply(result, i);
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        sub.onNext(result);
+                        sub.onComplete();
+                    }
+                });
+            }
+        };
     }
 
 //    private static <T> Publisher<T> sumPub(Publisher<T> pub) {
