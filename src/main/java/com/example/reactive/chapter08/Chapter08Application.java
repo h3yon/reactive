@@ -28,6 +28,7 @@ import reactor.core.publisher.Mono;
 
 @Slf4j
 @SpringBootApplication
+@EnableAsync
 @RestController
 public class Chapter08Application {
 
